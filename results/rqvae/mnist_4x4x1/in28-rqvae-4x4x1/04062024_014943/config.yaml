@@ -1,0 +1,124 @@
+arch:
+  ema: null
+  hparams:
+    loss_type: mse
+    restart_unused_codes: true
+    use_padding_idx: false
+    masked_dropout: 0.0
+    bottleneck_type: rq
+    embed_dim: 64
+    n_embed: 1024
+    latent_shape:
+    - 7
+    - 7
+    - 64
+    code_shape:
+    - 7
+    - 7
+    - 2
+    shared_codebook: true
+    decay: 0.99
+    latent_loss_weight: 0.25
+  checkpointing: true
+  type: rq-vae
+  code_hier: 1
+  ddconfig:
+    double_z: false
+    z_channels: 64
+    resolution: 28
+    in_channels: 1
+    out_ch: 1
+    ch: 32
+    ch_mult:
+    - 1
+    - 2
+    - 4
+    num_res_blocks: 2
+    attn_resolutions:
+    - 7
+    dropout: 0.0
+dataset:
+  transform:
+    type: null
+  type: mnist
+  transforms:
+    type: mnist
+optimizer:
+  type: adam
+  max_gn: null
+  warmup:
+    mode: fix
+    start_from_zero: true
+    epoch: 0.5
+    multiplier: 1
+    buffer_epoch: 0
+    min_lr: 0.0001
+  init_lr: 0.0001
+  weight_decay: 0.0
+  betas:
+  - 0.5
+  - 0.9
+  grad_accm_steps: 1
+experiment:
+  test_freq: 1
+  amp: false
+  batch_size: 64
+  epochs: 10
+  save_ckpt_freq: 5
+  total_batch_size: 64
+gan:
+  disc:
+    optimizer:
+      type: adam
+      max_gn: null
+      warmup:
+        mode: fix
+        start_from_zero: true
+        epoch: 0.5
+        multiplier: 1
+        buffer_epoch: 0
+        min_lr: 0.0001
+      init_lr: 0.0001
+      weight_decay: 0.0
+      betas:
+      - 0.5
+      - 0.9
+    arch:
+      in_channels: 1
+      num_layers: 2
+      use_actnorm: false
+      ndf: 32
+      spectral_norm: false
+  loss:
+    disc_loss: hinge
+    gen_loss: vanilla
+    disc_weight: 0.75
+    perceptual_weight: 1.0
+    disc_start: 0
+seed: 0
+runtime:
+  args:
+    model_config: /export/home/visual_tokenizer_sfr_intern/rq-vae-transformer/configs/mnist/stage1/in28-rqvae-4x4x1.yaml
+    result_path: /export/home/visual_tokenizer_sfr_intern/rq-vae-transformer/results/rqvae/mnist_4x4x1
+    load_path: ''
+    test_batch_size: 200
+    test_epoch: -1
+    postfix: ''
+    seed: 0
+    world_size: 1
+    local_rank: 0
+    node_rank: -1
+    dist_backend: nccl
+    timeout: 86400
+    eval: false
+    resume: false
+    rank: 0
+  extra_config: {}
+  distenv:
+    world_size: 1
+    world_rank: 0
+    local_rank: 0
+    num_gpus: 1
+    master: true
+    device_name: NVIDIA A100-SXM4-40GB
+result_path: /export/home/visual_tokenizer_sfr_intern/rq-vae-transformer/results/rqvae/mnist_4x4x1/in28-rqvae-4x4x1/04062024_014943

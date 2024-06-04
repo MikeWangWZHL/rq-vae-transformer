@@ -42,7 +42,7 @@ class TrainerTemplate():
                  ):
         super().__init__()
 
-        num_workers = 16
+        num_workers = 10
 
         if SMOKE_TEST:
             if not torch.distributed.is_initialized():

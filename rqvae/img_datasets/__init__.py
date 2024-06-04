@@ -17,7 +17,7 @@ import os
 import torch
 from torch.utils.data import Subset
 import torchvision
-from torchvision.datasets import ImageNet
+from torchvision.datasets import ImageNet, MNIST
 
 from .lsun import LSUNClass
 from .ffhq import FFHQ
@@ -52,6 +52,10 @@ def create_dataset(config, is_eval=False, logger=None):
         category_name = config.dataset.type.split('-')[-1]
         dataset_trn = LSUNClass(root, category_name=category_name, transform=transforms_trn)
         dataset_val = LSUNClass(root, category_name=category_name, transform=transforms_trn)
+    elif config.dataset.type == 'mnist':
+        root = root if root else 'data/mnist'
+        dataset_trn = MNIST(root, train=True, download=True, transform=transforms_trn)
+        dataset_val = MNIST(root, train=False, download=True, transform=transforms_val)
     else:
         raise ValueError('%s not supported...' % config.dataset.type)
 

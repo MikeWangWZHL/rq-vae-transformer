@@ -56,6 +56,12 @@ def create_transforms(config, split='train', is_eval=False):
             transforms.ToTensor(),
             transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
         ]
+    elif config.transforms.type == 'mnist':
+        transforms_ = [
+            transforms.Resize((28, 28)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ]
     elif config.transforms.type == 'none':
         transforms_ = []
     else:

@@ -152,7 +152,7 @@ class RQBottleneck(nn.Module):
 
     Arguments:
         latent_shape (Tuple[int, int, int]): the shape of latents, denoted (H, W, D)
-        code_shape (Tuple[int, int, int]): the shape of codes, denoted (h, w, d)
+        code_shape (Tuple[int, int, int]): the shape of codes, denoted (h, w, d) # d is the number of codebooks
         n_embed (int, List, or Tuple): the number of embeddings (i.e., the size of codebook)
             If isinstance(n_embed, int), the sizes of all codebooks are same.
         shared_codebook (bool): If True, codebooks are shared in all location. If False,
