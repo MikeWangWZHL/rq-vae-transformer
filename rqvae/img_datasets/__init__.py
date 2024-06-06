@@ -31,6 +31,7 @@ def create_dataset(config, is_eval=False, logger=None):
     transforms_val = create_transforms(config.dataset, split='val', is_eval=is_eval)
 
     root = config.dataset.get('root', None)
+    print("dataset root:", root)
 
     if config.dataset.type == 'imagenet':
         root = root if root else 'data/imagenet'

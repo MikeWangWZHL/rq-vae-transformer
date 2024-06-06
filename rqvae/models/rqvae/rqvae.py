@@ -73,6 +73,7 @@ class RQVAE(Stage1Model):
 
     def forward(self, xs):
         z_e = self.encode(xs)
+        assert list(z_e.shape[1:3]) == list(self.code_shape[:2]), f"z_e.shape[1:3] = {z_e.shape[1:3]} is not match with code_shape[:2] = {self.code_shape[:2]}"
         z_q, quant_loss, code = self.quantizer(z_e)
         out = self.decode(z_q)
         return out, quant_loss, code

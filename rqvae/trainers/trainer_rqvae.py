@@ -291,7 +291,7 @@ class Trainer(TrainerTemplate):
             accm.update(codes, metrics, count=1)
 
             if self.distenv.master:
-                line = f"""(epoch {epoch} / iter {it}) """
+                line = f"""(epoch {epoch} | iter {it} / {len(self.loader_trn)}) """
                 line += accm.get_summary().print_line()
                 line += f""", lr: {scheduler.get_last_lr()[0]:e}"""
                 pbar.set_description(line)

@@ -32,6 +32,23 @@ def create_transforms(config, split='train', is_eval=False):
                 transforms.ToTensor(),
                 transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
             ]
+    elif config.transforms.type == 'imagenet128x128':
+        if split == 'train' and not is_eval:
+            transforms_ = [
+                transforms.Resize(128),
+                transforms.RandomCrop(128),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+            ]
+        else:
+            transforms_ = [
+                transforms.Resize(128),
+                transforms.CenterCrop(128),
+                transforms.Resize((128, 128)),
+                transforms.ToTensor(),
+                transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+            ]
     elif 'ffhq' in config.transforms.type:
         resolution = int(config.transforms.type.split('_')[0].split('x')[-1])
         if split == 'train' and not is_eval:

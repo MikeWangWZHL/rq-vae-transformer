@@ -61,7 +61,9 @@ if __name__ == '__main__':
     torch.cuda.set_device(device)
 
     dataset_trn, dataset_val = create_dataset(config, is_eval=args.eval, logger=logger)
+    print("successfully created dataset...")
     model, model_ema = create_model(config.arch, ema=config.arch.ema is not None)
+    print("successfully created model...")
     model = model.to(device)
     if model_ema:
         model_ema = model_ema.to(device)
