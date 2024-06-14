@@ -49,6 +49,10 @@ class Trainer(TrainerTemplate):
         else:
             self.n_codebook = self.config.arch.hparams.code_shape[-1]
 
+        # if disable some losses: TODO: add this control
+        self.disable_gan_loss = getattr(self.config.experiment, 'disable_gan_loss', False)
+        self.disable_percep_loss = getattr(self.config.experiment, 'disable_percep_loss', False)
+
         # GAN related part
         gan_config = self.config.gan
 
@@ -167,7 +171,7 @@ class Trainer(TrainerTemplate):
             loss_pcpt = self.perceptual_loss(xs, xs_recon)
             p_weight = self.perceptual_weight
 
-            if use_discriminator:
+            if use_discriminator and not self.disable_gan_loss:
                 loss_gen, loss_disc, logits = self.gan_loss(xs, xs_recon, mode='eval')
             else:
                 loss_gen = torch.zeros((), device=self.device)
@@ -248,7 +252,7 @@ class Trainer(TrainerTemplate):
             loss_pcpt = self.perceptual_loss(xs, xs_recon)
             p_weight = self.perceptual_weight
 
-            if use_discriminator:
+            if use_discriminator and not self.disable_gan_loss:
                 loss_gen, _, _ = self.gan_loss(xs, xs_recon, mode='gen')
                 g_weight = calculate_adaptive_weight(loss_recon + p_weight * loss_pcpt,
                                                      loss_gen,
@@ -266,7 +270,7 @@ class Trainer(TrainerTemplate):
             # discriminator loss
             discriminator.zero_grad(set_to_none=True)
 
-            if use_discriminator:
+            if use_discriminator and not self.disable_gan_loss:
                 _, loss_disc, logits = self.gan_loss(xs, xs_recon, mode='disc')
                 (self.disc_weight * loss_disc).backward()
                 self.disc_optimizer.step()
@@ -302,7 +306,7 @@ class Trainer(TrainerTemplate):
                     for key, value in metrics.items():
                         self.writer.add_scalar(f'loss_step/{key}', value, 'train', global_iter)
                     self.writer.add_scalar('lr_step', scheduler.get_last_lr()[0], 'train', global_iter)
-                    if use_discriminator:
+                    if use_discriminator and not self.disable_gan_loss:
                         self.writer.add_scalar('d_lr_step', self.disc_scheduler.get_last_lr()[0], 'train', global_iter)
 
                 if (global_iter+1) % 250 == 0:
