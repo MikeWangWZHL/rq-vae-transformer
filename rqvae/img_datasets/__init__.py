@@ -17,7 +17,7 @@ import os
 import torch
 from torch.utils.data import Subset
 import torchvision
-from torchvision.datasets import ImageNet, MNIST
+from torchvision.datasets import ImageNet, MNIST, CIFAR100
 
 from .lsun import LSUNClass
 from .ffhq import FFHQ
@@ -57,6 +57,10 @@ def create_dataset(config, is_eval=False, logger=None):
         root = root if root else 'data/mnist'
         dataset_trn = MNIST(root, train=True, download=True, transform=transforms_trn)
         dataset_val = MNIST(root, train=False, download=True, transform=transforms_val)
+    elif config.dataset.type == 'cifar100':
+        root = root if root else 'data/cifar100'
+        dataset_trn = CIFAR100(root, train=True, download=True, transform=transforms_trn)
+        dataset_val = CIFAR100(root, train=False, download=True, transform=transforms_val)
     else:
         raise ValueError('%s not supported...' % config.dataset.type)
 

@@ -130,3 +130,6 @@ dmypy.json
 
 *.pt
 results
+
+*api_key*
+*wandb

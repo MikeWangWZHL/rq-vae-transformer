@@ -33,7 +33,7 @@ def initialize(args, logger=None):
     args.world_size = int(os.environ.get('WORLD_SIZE', 1))
     args.local_rank = int(os.environ.get('LOCAL_RANK', 0))
 
-    if args.world_size >= 1:
+    if args.world_size >= 0:
 
         os.environ["RANK"] = str(args.rank)
         os.environ["WORLD_SIZE"] = str(args.world_size)

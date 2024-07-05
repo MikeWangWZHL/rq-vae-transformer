@@ -26,7 +26,8 @@ from rqvae.img_datasets import create_dataset
 from rqvae.optimizer import create_optimizer, create_scheduler
 from rqvae.utils.utils import set_seed, compute_model_size, get_num_conv_linear_layers
 from rqvae.utils.setup import setup
-
+import wandb
+from omegaconf import OmegaConf
 
 parser = argparse.ArgumentParser()
 
@@ -45,6 +46,7 @@ parser.add_argument('--dist-backend', default='nccl', type=str, help='distribute
 parser.add_argument('--timeout', type=int, default=86400, help='time limit (s) to wait for other nodes in DDP')
 parser.add_argument('--eval', action='store_true')
 parser.add_argument('--resume', action='store_true')
+parser.add_argument('--run_name', type=str, default='default')
 
 args, extra_args = parser.parse_known_args()
 
@@ -72,6 +74,21 @@ if __name__ == '__main__':
     train_epochs = config.experiment.epochs
     steps_per_epoch = math.ceil(len(dataset_trn) / (config.experiment.batch_size * distenv.world_size))
     epoch_st = 0
+
+
+    # Initialize WandB
+    use_wandb = getattr(config.experiment, "use_wandb", False)
+    if use_wandb and distenv.master:
+        if "WANDB_API_KEY" not in os.environ:
+            os.environ["WANDB_API_KEY"] = (
+                open("wandb_api_key_salesforce").read().strip()
+            )
+        print(f"Using wandB API key: {os.environ['WANDB_API_KEY']}")
+        wandb.init(
+            project="sanity_check_rq_vae",
+            config=OmegaConf.to_container(config),
+            name=getattr(config.experiment, "run_name", args.run_name)
+        )
 
     if distenv.master:
         logger.info(f'#conv+linear layers: {get_num_conv_linear_layers(model)}')

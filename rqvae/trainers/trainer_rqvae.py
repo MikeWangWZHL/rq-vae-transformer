@@ -25,6 +25,9 @@ import rqvae.utils.dist as dist_utils
 from .accumulator import AccmStage1WithGAN
 from .trainer import TrainerTemplate
 
+import wandb
+from omegaconf import OmegaConf
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,45 +52,64 @@ class Trainer(TrainerTemplate):
         else:
             self.n_codebook = self.config.arch.hparams.code_shape[-1]
 
-        # if disable some losses: TODO: add this control
-        self.disable_gan_loss = getattr(self.config.experiment, 'disable_gan_loss', False)
-        self.disable_percep_loss = getattr(self.config.experiment, 'disable_percep_loss', False)
+        self.use_gan_loss = getattr(self.config.experiment, "use_gan_loss", False)
+        self.use_percep_loss = getattr(self.config.experiment, "use_percep_loss", False)
+
+        self.use_wandb = getattr(self.config.experiment, "use_wandb", False)
 
         # GAN related part
-        gan_config = self.config.gan
+        if self.use_gan_loss:
+            gan_config = self.config.gan
 
-        disc_config = gan_config.disc
-        self.gan_start_epoch = gan_config.loss.disc_start
-        num_epochs_for_gan = self.config.experiment.epochs - self.gan_start_epoch
+            disc_config = gan_config.disc
+            self.gan_start_epoch = gan_config.loss.disc_start
+            num_epochs_for_gan = self.config.experiment.epochs - self.gan_start_epoch
 
-        disc_model, disc_optim, disc_sched = \
-            create_discriminator_with_optimizer_scheduler(disc_config,
-                                                          steps_per_epoch=len(self.loader_trn),
-                                                          max_epoch=num_epochs_for_gan,
-                                                          distenv=self.distenv,
-                                                          )
-        disc_state_dict = kwargs.get('disc_state_dict', None)
-        if disc_state_dict is not None:
-            disc_model.load_state_dict(disc_state_dict)
-            logger.info('[state] discriminator loaded')
-        disc_model = disc_model.to(self.device)
+            disc_model, disc_optim, disc_sched = \
+                create_discriminator_with_optimizer_scheduler(disc_config,
+                                                            steps_per_epoch=len(self.loader_trn),
+                                                            max_epoch=num_epochs_for_gan,
+                                                            distenv=self.distenv,
+                                                            )
+            disc_state_dict = kwargs.get('disc_state_dict', None)
+            if disc_state_dict is not None:
+                disc_model.load_state_dict(disc_state_dict)
+                logger.info('[state] discriminator loaded')
+            disc_model = disc_model.to(self.device)
 
-        self.discriminator = dist_utils.dataparallel_and_sync(self.distenv, disc_model)
-        self.disc_optimizer = disc_optim
-        self.disc_scheduler = disc_sched
+            self.discriminator = dist_utils.dataparallel_and_sync(self.distenv, disc_model)
+            self.disc_optimizer = disc_optim
+            self.disc_scheduler = disc_sched
 
-        d_loss, g_loss, p_loss = create_vqgan_loss(gan_config.loss)
+            d_loss, g_loss, p_loss = create_vqgan_loss(gan_config.loss)
 
-        self.disc_loss = d_loss
-        self.gen_loss = g_loss
-        self.perceptual_loss = p_loss.to(self.device).eval()
-        self.perceptual_weight = gan_config.loss.perceptual_weight
-        self.disc_weight = gan_config.loss.disc_weight
+            self.disc_loss = d_loss
+            self.gen_loss = g_loss
+            self.disc_weight = gan_config.loss.disc_weight
+        else:
+            p_loss = None
+            self.disc_weight = 0.0
+        
+        if self.use_percep_loss:
+            if p_loss is None:
+                _, _, p_loss = create_vqgan_loss(gan_config.loss)
+            self.perceptual_loss = p_loss.to(self.device).eval()
+            self.perceptual_weight = gan_config.loss.perceptual_weight
+        else:
+            self.perceptual_weight = 0.0
 
         if hasattr(self.model, 'module'):
             self.get_last_layer = self.model.module.get_last_layer
         else:
             self.get_last_layer = self.model.get_last_layer
+        
+        self.log_rec_interval = getattr(self.config.experiment, "log_rec_interval", 100)
+
+        # gradient accumulation
+        self.accumulation_steps = getattr(
+            self.config.experiment, "accumulation_steps", 1
+        )  # Add accumulation steps
+        print("gradient accumulation steps: ", self.accumulation_steps)
 
     def get_accm(self):
         config = self.config
@@ -141,11 +163,13 @@ class Trainer(TrainerTemplate):
     @torch.no_grad()
     def eval(self, valid=True, ema=False, verbose=False, epoch=0):
         model = self.model_ema if ema else self.model
-        discriminator = self.discriminator
+        if self.use_gan_loss:
+            discriminator = self.discriminator
+            discriminator.eval()
+            use_discriminator = True if epoch >= self.gan_start_epoch else False
+        
         loader = self.loader_val if valid else self.loader_trn
         n_inst = len(self.dataset_val) if valid else len(self.dataset_trn)
-
-        use_discriminator = True if epoch >= self.gan_start_epoch else False
 
         accm = self.get_accm()
 
@@ -155,7 +179,6 @@ class Trainer(TrainerTemplate):
             pbar = enumerate(loader)
 
         model.eval()
-        discriminator.eval()
         for it, inputs in pbar:
             model.zero_grad()
             xs = inputs[0].to(self.device)
@@ -167,11 +190,15 @@ class Trainer(TrainerTemplate):
             loss_rec_lat = outputs['loss_total']
             loss_recon = outputs['loss_recon']
             loss_latent = outputs['loss_latent']
+            
+            if self.use_percep_loss:
+                loss_pcpt = self.perceptual_loss(xs, xs_recon)
+                p_weight = self.perceptual_weight
+            else:
+                loss_pcpt = torch.zeros((), device=self.device)
+                p_weight = 0.0
 
-            loss_pcpt = self.perceptual_loss(xs, xs_recon)
-            p_weight = self.perceptual_weight
-
-            if use_discriminator and not self.disable_gan_loss:
+            if self.use_gan_loss and use_discriminator:
                 loss_gen, loss_disc, logits = self.gan_loss(xs, xs_recon, mode='eval')
             else:
                 loss_gen = torch.zeros((), device=self.device)
@@ -216,6 +243,10 @@ class Trainer(TrainerTemplate):
                     self.reconstruct_partial_codes(xs, 0, code_idx, mode, 'select')
                     self.reconstruct_partial_codes(xs, 0, code_idx, mode, 'add')
 
+        if self.distenv.master and self.use_wandb:
+            for key, value in accm.get_summary(n_inst).metrics.items():
+                wandb.log({f"avg valid_{key}": value})
+
         summary = accm.get_summary(n_inst)
         summary['xs'] = xs
 
@@ -224,10 +255,12 @@ class Trainer(TrainerTemplate):
     def train(self, optimizer=None, scheduler=None, scaler=None, epoch=0):
         model = self.model
         model.train()
-
-        discriminator = self.discriminator
-        discriminator.train()
-        use_discriminator = True if epoch >= self.gan_start_epoch else False
+        
+        if self.use_gan_loss:
+            discriminator = self.discriminator
+            discriminator.train()
+            use_discriminator = True if epoch >= self.gan_start_epoch else False
+            self.disc_optimizer.zero_grad(set_to_none=True)
 
         accm = self.get_accm()
 
@@ -235,6 +268,8 @@ class Trainer(TrainerTemplate):
             pbar = tqdm(enumerate(self.loader_trn), total=len(self.loader_trn))
         else:
             pbar = enumerate(self.loader_trn)
+
+        optimizer.zero_grad(set_to_none=True)
 
         for it, inputs in pbar:
             model.zero_grad(set_to_none=True)
@@ -249,10 +284,14 @@ class Trainer(TrainerTemplate):
             loss_latent = outputs['loss_latent']
 
             # generator loss
-            loss_pcpt = self.perceptual_loss(xs, xs_recon)
-            p_weight = self.perceptual_weight
+            if self.use_percep_loss:
+                loss_pcpt = self.perceptual_loss(xs, xs_recon)
+                p_weight = self.perceptual_weight
+            else:
+                loss_pcpt = torch.zeros((), device=self.device)
+                p_weight = 0.0
 
-            if use_discriminator and not self.disable_gan_loss:
+            if self.use_gan_loss and use_discriminator:
                 loss_gen, _, _ = self.gan_loss(xs, xs_recon, mode='gen')
                 g_weight = calculate_adaptive_weight(loss_recon + p_weight * loss_pcpt,
                                                      loss_gen,
@@ -264,17 +303,25 @@ class Trainer(TrainerTemplate):
             loss_gen_total = loss_rec_lat + p_weight * loss_pcpt + g_weight * self.disc_weight * loss_gen
             loss_gen_total.backward()
 
-            optimizer.step()
-            scheduler.step()
 
-            # discriminator loss
-            discriminator.zero_grad(set_to_none=True)
+            if (it + 1) % self.accumulation_steps == 0:
+                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                scheduler.step()
+            # optimizer.step()
+            # scheduler.step()
 
-            if use_discriminator and not self.disable_gan_loss:
+            if self.use_gan_loss and use_discriminator:
+                # discriminator loss
+                discriminator.zero_grad(set_to_none=True)
                 _, loss_disc, logits = self.gan_loss(xs, xs_recon, mode='disc')
                 (self.disc_weight * loss_disc).backward()
-                self.disc_optimizer.step()
-                self.disc_scheduler.step()
+                if (it + 1) % self.accumulation_steps == 0:
+                    self.disc_optimizer.step()
+                    self.disc_optimizer.zero_grad(set_to_none=True)
+                    self.disc_scheduler.step()
+                # self.disc_optimizer.step()
+                # self.disc_scheduler.step()
             else:
                 loss_disc = torch.zeros((), device=self.device)
                 logits = {}
@@ -306,14 +353,23 @@ class Trainer(TrainerTemplate):
                     for key, value in metrics.items():
                         self.writer.add_scalar(f'loss_step/{key}', value, 'train', global_iter)
                     self.writer.add_scalar('lr_step', scheduler.get_last_lr()[0], 'train', global_iter)
-                    if use_discriminator and not self.disable_gan_loss:
+                    if self.use_gan_loss and use_discriminator:
                         self.writer.add_scalar('d_lr_step', self.disc_scheduler.get_last_lr()[0], 'train', global_iter)
-
-                if (global_iter+1) % 250 == 0:
+                
+                if (global_iter+1) % self.log_rec_interval == 0:
                     xs_real, xs_recon = model.module.get_recon_imgs(xs[:16], xs_recon[:16])
                     grid = torch.cat([xs_real[:8], xs_recon[:8], xs_real[8:], xs_recon[8:]], dim=0)
                     grid = torchvision.utils.make_grid(grid, nrow=8)
+                    if self.use_wandb:
+                        wandb.log({f"train reconstruction": wandb.Image(grid)}, step=wandb.run.step)
                     self.writer.add_image('reconstruction_step', grid, 'train', global_iter)
+                
+                if self.use_wandb and (global_iter+1) % 10 == 0:
+                    for key, value in metrics.items():
+                        wandb.log({f"train_{key}": value})
+                        wandb.log({"train_lr": scheduler.get_last_lr()[0]})
+                        if self.use_gan_loss and use_discriminator:
+                            wandb.log({"train_gan_disc_lr": self.disc_scheduler.get_last_lr()[0]})
 
         summary = accm.get_summary()
         summary['xs'] = xs
@@ -364,6 +420,8 @@ class Trainer(TrainerTemplate):
 
         grid = torch.cat([xs_real[:8], xs_recon[:8], xs_real[8:], xs_recon[8:]], dim=0)
         grid = torchvision.utils.make_grid(grid, nrow=8)
+        if self.use_wandb:
+            wandb.log({f"{mode} reconstruction": wandb.Image(grid)})
         self.writer.add_image('reconstruction', grid, mode, epoch)
 
     @torch.no_grad()
@@ -396,12 +454,13 @@ class Trainer(TrainerTemplate):
         ckpt_path = os.path.join(self.config.result_path, 'epoch%d_model.pt' % epoch)
         logger.info("epoch: %d, saving %s", epoch, ckpt_path)
         ckpt = {
-            'epoch': epoch,
-            'state_dict': self.model.module.state_dict(),
-            'discriminator': self.discriminator.module.state_dict(),
-            'optimizer': optimizer.state_dict(),
-            'scheduler': scheduler.state_dict()
+            "epoch": epoch,
+            "state_dict": self.model.module.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
         }
+        if self.use_gan_loss:
+            ckpt["discriminator"] = self.discriminator.module.state_dict()
         if self.model_ema is not None:
             ckpt.update(state_dict_ema=self.model_ema.module.module.state_dict())
         torch.save(ckpt, ckpt_path)
